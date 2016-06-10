@@ -5,6 +5,7 @@ const ShareMenu = require('./share_menu');
 const MentionMenu = require('./mention_menu');
 const BadgeCount = require('./badge_count');
 const Common = require("../common");
+const HistoryManager = require('../handlers/history_manager');
 
 
 class Injector {
@@ -17,6 +18,8 @@ class Injector {
     webFrame.setZoomLevelLimits(1, 1);
 
     new MenuHandler().create();
+
+    this.historyManager = new HistoryManager();
   }
 
   initAngularInjection() {
@@ -42,11 +45,58 @@ class Injector {
           });
           $rootScope.shareMenu = ShareMenu.inject;
           $rootScope.mentionMenu = MentionMenu.inject;
+
+          $rootScope.$on('root:pageInit:success', function(){
+            $rootScope.$on("message:add:success", function(e, oMessage){
+              var oMessage2 = angular.copy(oMessage);
+              oMessage2.MMActualSender = self.getStableUserId(oMessage.MMActualSender);
+              oMessage2.MMPeerUserName = self.getStableUserId(oMessage.MMPeerUserName);
+              self.historyManager.saveHistory(self.getStableUserId(oMessage.MMPeerUserName), oMessage2);
+            });
+
+            $(document).on('click', '.chat_list .chat_item', function(e){
+               self.restoreChatHistory($(e.target).scope().chatContact.UserName);
+            });
+          });
+
         }]);
         return angularBootstrapReal.apply(angular, arguments);
       } : angularBootstrapReal,
       set: (real) => (angularBootstrapReal = real)
     });
+  }
+
+  getStableUserId(userName){
+    const contact = window._contacts[userName];
+    return `${contact.NickName}_&&_${contact.RemarkName}`;
+  }
+
+  getActualSender(stableUserId){
+    for (let userName in window._contacts) {
+      let contact = window._contacts[userName];
+      if(`${contact.NickName}_&&_${contact.RemarkName}` === stableUserId){
+        return contact.UserName
+      }
+    }
+  }
+
+  restoreChatHistory(userName) {
+    if(!userName){
+      return;
+    }
+    let self = this;
+    const scope = angular.element('#chatArea').scope();
+    if (!scope.chatContent || scope.chatContent.length === 0) {
+      self.historyManager.getHistory(self.getStableUserId(userName)).then(function(history){
+        history = history || [];
+        history.forEach(function(oMessage){
+          oMessage.MMStatus = 0;
+          oMessage.MMActualSender = self.getActualSender(oMessage.MMActualSender);
+          oMessage.MMPeerUserName = self.getActualSender(oMessage.MMPeerUserName);
+        });
+        scope.chatContent = history;
+      });
+    }
   }
 
   initInjectBundle() {
