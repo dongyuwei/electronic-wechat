@@ -48,14 +48,18 @@ class Injector {
 
           $rootScope.$on('root:pageInit:success', function(){
             $rootScope.$on("message:add:success", function(e, oMessage){
-              var oMessage2 = angular.copy(oMessage);
-              oMessage2.MMActualSender = self.getStableUserId(oMessage.MMActualSender);
-              oMessage2.MMPeerUserName = self.getStableUserId(oMessage.MMPeerUserName);
-              self.historyManager.saveHistory(self.getStableUserId(oMessage.MMPeerUserName), oMessage2);
+              self.saveChatHistory(oMessage);
             });
 
-            $(document).on('click', '.chat_list .chat_item', function(e){
-               self.restoreChatHistory($(e.target).scope().chatContact.UserName);
+            var timer = 0;
+            $rootScope.$on("mmRepeat:change", function(){
+              if(timer){
+                clearTimeout(timer);
+              }
+              
+              timer = setTimeout(function(){
+                self.restoreChatHistory(angular.element('#chatArea').scope().currentUser);   
+              }, 100);
             });
           });
 
@@ -66,37 +70,56 @@ class Injector {
     });
   }
 
-  getStableUserId(userName){
+  getStableUserId(userName) {
     const contact = window._contacts[userName];
     return `${contact.NickName}_&&_${contact.RemarkName}`;
   }
 
-  getActualSender(stableUserId){
+  getActualSender(oMessage) {
     for (let userName in window._contacts) {
       let contact = window._contacts[userName];
-      if(`${contact.NickName}_&&_${contact.RemarkName}` === stableUserId){
-        return contact.UserName
+      if(contact.NickName === oMessage.NickName && contact.RemarkName === oMessage.RemarkName){
+        return contact.UserName;
       }
     }
+  }
+
+  saveChatHistory(oMessage) {
+    const contact = window._contacts[oMessage.MMPeerUserName];
+    var oMessage2 = angular.copy(oMessage);
+    oMessage2.NickName = contact.NickName;
+    oMessage2.RemarkName = contact.RemarkName;
+    delete oMessage2.RecommendInfo;
+    
+    // see https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm#Things_that_don%27t_work_with_structured_clones
+    // we must delete "oMessage2.MMCancelUploadFileFunc" right now. To check every property of oMessage2 is better/safer strategy. 
+    // This is tight with and limited by current history_manager's storage backend(IndexedDB).
+    for(let key in oMessage2){
+      if(oMessage2.hasOwnProperty(key) && typeof oMessage[key] === 'function'){
+        delete oMessage2[key];
+      }
+    }
+
+    this.historyManager.saveHistory(oMessage2);
   }
 
   restoreChatHistory(userName) {
     if(!userName){
       return;
     }
-    let self = this;
-    const scope = angular.element('#chatArea').scope();
-    if (!scope.chatContent || scope.chatContent.length === 0) {
-      self.historyManager.getHistory(self.getStableUserId(userName)).then(function(history){
-        history = history || [];
-        history.forEach(function(oMessage){
-          oMessage.MMStatus = 0;
-          oMessage.MMActualSender = self.getActualSender(oMessage.MMActualSender);
-          oMessage.MMPeerUserName = self.getActualSender(oMessage.MMPeerUserName);
-        });
-        scope.chatContent = history;
+    var self = this;
+    var chatContent = window._chatContent[userName];
+    self.historyManager.getHistory(self.getStableUserId(userName)).then(function(history){
+      history = history || [];
+      history.forEach(function(oMessage){
+        oMessage.MMStatus = 0;
+        oMessage.MMUnread = false;
+        oMessage.MMActualSender = oMessage.MMPeerUserName = self.getActualSender(oMessage);
       });
-    }
+      if(!window._chatContent[userName] || window._chatContent[userName].length === 0){
+        window._chatContent[userName] = angular.element('#chatArea').scope().chatContent = history;
+      }
+    });
   }
 
   initInjectBundle() {

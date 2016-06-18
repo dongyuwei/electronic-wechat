@@ -1,16 +1,22 @@
-const localforage = require('localforage');
+const Dexie = require('dexie');
 
 class HistoryManager {
-    saveHistory(peerUserName, oMessage) {
-        localforage.getItem(peerUserName).then(function(/*Array*/history){
-            history = history || [];
-            history.push(oMessage);
-            localforage.setItem(peerUserName, history);
+    constructor() {
+        this.db = new Dexie("wechat_history");
+        this.db.version(1).stores({
+            history: "++id,[NickName+RemarkName],Content"
         });
     }
 
+    saveHistory(oMessage) {
+        this.db.history.add(oMessage);
+    }
+
     getHistory(peerUserName) {
-        return localforage.getItem(peerUserName);
+        return this.db.history
+            .where('[NickName+RemarkName]')
+            .equals(peerUserName.split('_&&_'))
+            .toArray();
     }
 }
 
